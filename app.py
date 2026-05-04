@@ -86,7 +86,8 @@ if prompt := st.chat_input("Ask a question about your document..."):
                         st.markdown(f"**Chunk {i+1}:**")
                         st.write(cleaned)
 
-    st.session_state.chat_history.append({
-        "role": "assistant",
-        "content": clean_answer
-    })
+        if st.session_state.qa_chain:
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": clean_answer
+            })

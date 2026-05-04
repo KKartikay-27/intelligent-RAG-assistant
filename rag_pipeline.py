@@ -1,10 +1,12 @@
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_ollama import OllamaLLM, OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_groq import ChatGroq
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 import tempfile
+import streamlit as st
 
 
 def load_pdf(uploaded_file):
@@ -13,48 +15,49 @@ def load_pdf(uploaded_file):
         tmp_path = tmp_file.name
 
     loader = PyPDFLoader(tmp_path)
-    documents = loader.load()
-    return documents
+    return loader.load()
 
 
 def split_text(documents):
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=2000,
-        chunk_overlap=300,
+        chunk_size=1200,
+        chunk_overlap=200,
         separators=["\n\n", "\n", ".", " ", ""]
     )
     return text_splitter.split_documents(documents)
 
 
 def create_vector_store(chunks):
-    embeddings = OllamaEmbeddings(model="llama3")
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
 
     vectorstore = Chroma.from_documents(
         documents=chunks,
-        embedding=embeddings,
-        persist_directory="./chroma_db"
+        embedding=embeddings
     )
 
     return vectorstore
 
 
 def create_qa_chain(vectorstore):
-
-    llm = OllamaLLM(model="llama3")
+    llm = ChatGroq(
+        model="llama-3.1-8b-instant",
+        temperature=0,
+        groq_api_key=st.secrets["GROQ_API_KEY"]
+    )
 
     prompt_template = """
 You are a knowledgeable AI assistant.
 
-Use the provided context to answer the question.
+Use only the provided context to answer the question.
 
 Rules:
 - Base your answer on the context
 - If the answer is clearly present, explain it properly
-- If the answer is partially present, combine relevant pieces carefully
-- Do NOT introduce completely new facts
+- If partially present, combine relevant pieces carefully
+- Do not introduce outside facts
 - If nothing relevant is found, say "I don't know"
-
-Be clear, accurate, and concise.
 
 Context:
 {context}
@@ -65,24 +68,19 @@ Question:
 Answer:
 """
 
-    PROMPT = PromptTemplate(
+    prompt = PromptTemplate(
         template=prompt_template,
         input_variables=["context", "question"]
     )
 
     retriever = vectorstore.as_retriever(
         search_type="mmr",
-        search_kwargs={
-            "k": 8,
-            "fetch_k": 20
-        }
+        search_kwargs={"k": 5, "fetch_k": 15}
     )
 
-    qa_chain = RetrievalQA.from_chain_type(
+    return RetrievalQA.from_chain_type(
         llm=llm,
         retriever=retriever,
         return_source_documents=True,
-        chain_type_kwargs={"prompt": PROMPT}
+        chain_type_kwargs={"prompt": prompt}
     )
-
-    return qa_chain
